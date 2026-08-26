@@ -1,0 +1,15 @@
+services:
+  friday-extras-backend:
+    image: ghcr.io/polygl0ts/friday-extras-backend:main
+    build: .
+    environment:
+      EXTRAS_RCTF_ORIGIN: "http://localhost:8090"
+      EXTRAS_DATABASE_URL: "sqlite:////data/friday-extras.db"
+      EXTRAS_CORS_ORIGINS: '["http://localhost:5173"]'
+      EXTRAS_WEB_ORIGIN: "http://localhost:5173"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    init: true
+    ports:
+        - "8091:8000"
