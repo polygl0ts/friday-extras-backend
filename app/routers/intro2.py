@@ -1,58 +1,49 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends
 
 from app.auth import get_fresh_identity
 from app.rctf_client import RctfClient, TeamIdentity, get_rctf_client
-from app.schemas import Intro2FileOut, Intro2StepOut
+from app.schemas import Intro2FileOut, Intro2StepOut, Intro2TrackOut
 
 router = APIRouter(prefix="/intro2", tags=["intro2"])
 
 INTRO2_TAG = "intro2"
 
 
-@router.get("/track", response_model=list[Intro2StepOut])
-async def intro2_track(
-    identity: TeamIdentity = Depends(get_fresh_identity),
-    client: RctfClient = Depends(get_rctf_client),
-) -> list[Intro2StepOut]:
-    challenges = await client.list_challenges()
-    steps = [c for c in challenges if INTRO2_TAG in (c.get("tags") or [])]
-    # `or 0`, not `.get("sortWeight", 0)`: v2 always emits the key and sends
-    # `null` when a challenge has no weight (v1 omitted it instead), so the
-    # default never applies and a mix of weighted and unweighted challenges
-    # would raise TypeError comparing None to an int - a 500 on this endpoint.
-    steps.sort(key=lambda c: (c.get("sortWeight") or 0, c.get("name") or ""))
+def _sort_key(chall: dict[str, Any]) -> tuple[int, str]:
+    return (chall.get("sortWeight") or 0, chall.get("name") or "")
 
-    # Fresh identity: the frontend refetches this track the instant a flag is
-    # accepted, so a cached solve set would show the step the player just
-    # finished as still in progress.
-    solved = identity.solved_challenge_ids
 
+def _files(chall: dict[str, Any]) -> list[Intro2FileOut]:
+    """Attachments, passed through verbatim so the frontend can render the same
+    downloads the tiered grid does.
+    """
+    raw_files = chall.get("files")
+    return [
+        Intro2FileOut(
+            name=str(f.get("name") or ""),
+            url=str(f.get("url") or ""),
+            size=f.get("size"),
+        )
+        for f in (raw_files if isinstance(raw_files, list) else [])
+        if isinstance(f, dict) and f.get("name") and f.get("url")
+    ]
+
+
+def _steps(challs: list[dict[str, Any]], solved: frozenset[str]) -> list[Intro2StepOut]:
+    """One track's challenges as numbered steps, in order."""
     result: list[Intro2StepOut] = []
-    unlocked = True  # first step is always unlocked
-    for index, chall in enumerate(steps, start=1):
+    unlocked = True  # first step of every track is always unlocked
+    for index, chall in enumerate(sorted(challs, key=_sort_key), start=1):
         chall_id = str(chall.get("id"))
         if chall_id in solved:
             state = "done"
         elif unlocked:
             state = "in_progress"
-            unlocked = False  # only one step is ever "in progress" at a time
+            unlocked = False
         else:
             state = "locked"
-
-        # Attachments are passed through verbatim so the frontend can render
-        # the same downloads the tiered grid does. Guarded because the shape is
-        # rCTF's, not ours: a non-list, or entries missing name/url, must not
-        # take the whole track down with a validation error.
-        raw_files = chall.get("files")
-        files = [
-            Intro2FileOut(
-                name=str(f.get("name") or ""),
-                url=str(f.get("url") or ""),
-                size=f.get("size"),
-            )
-            for f in (raw_files if isinstance(raw_files, list) else [])
-            if isinstance(f, dict) and f.get("name") and f.get("url")
-        ]
 
         result.append(
             Intro2StepOut(
@@ -62,7 +53,32 @@ async def intro2_track(
                 description=chall.get("description", ""),
                 status=state,
                 category=str(chall.get("category") or ""),
-                files=files,
+                files=_files(chall),
             )
         )
     return result
+
+
+@router.get("/tracks", response_model=list[Intro2TrackOut])
+async def intro2_tracks(
+    identity: TeamIdentity = Depends(get_fresh_identity),
+    client: RctfClient = Depends(get_rctf_client),
+) -> list[Intro2TrackOut]:
+    """Every INTRO2 track, one per category, in a single request."""
+    challenges = await client.list_challenges()
+
+    by_category: dict[str, list[dict[str, Any]]] = {}
+    for chall in challenges:
+        if INTRO2_TAG not in (chall.get("tags") or []):
+            continue
+        category = str(chall.get("category") or "").strip().lower()
+        if not category:
+            continue
+        by_category.setdefault(category, []).append(chall)
+
+    solved = identity.solved_challenge_ids
+
+    return [
+        Intro2TrackOut(category=category, steps=_steps(by_category[category], solved))
+        for category in sorted(by_category)
+    ]

@@ -24,21 +24,90 @@ def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_intro2_sequential_unlock(client: TestClient, fake_client: FakeRctfClient) -> None:
+def test_intro2_tracks_are_independent(client: TestClient, fake_client: FakeRctfClient) -> None:
+    """The whole point of per-category tracks: each category unlocks on its own.
+    Two solves deep into pwn must not open web's second step, and web's first
+    step is open from the start even with nothing solved in it."""
     fake_client.identities["player-token"] = TeamIdentity("t1", "n1ght0wl", is_admin=False)
     fake_client.challenges = [
-        {"id": "i1", "name": "Your First Flag", "tags": ["intro2"], "sortWeight": 1},
-        {"id": "i2", "name": "Inspect Element", "tags": ["intro2"], "sortWeight": 2},
-        {"id": "i3", "name": "Base What?", "tags": ["intro2"], "sortWeight": 3},
-        {"id": "i4", "name": "Cookie Jar", "tags": ["intro2"], "sortWeight": 4},
-        {"id": "other", "name": "not intro2", "tags": ["web"], "sortWeight": 1},
+        {"id": "p1", "name": "Stack Smash", "category": "pwn", "tags": ["intro2"], "sortWeight": 1},
+        {"id": "p2", "name": "Ret2win", "category": "pwn", "tags": ["intro2"], "sortWeight": 2},
+        {"id": "p3", "name": "ROP", "category": "pwn", "tags": ["intro2"], "sortWeight": 3},
+        {"id": "w1", "name": "Inspect Element", "category": "web", "tags": ["intro2"], "sortWeight": 1},
+        {"id": "w2", "name": "Cookie Jar", "category": "web", "tags": ["intro2"], "sortWeight": 2},
+        {"id": "other", "name": "not intro2", "category": "web", "tags": ["web"], "sortWeight": 1},
     ]
-    fake_client.solves["t1"] = {"i1", "i2"}
+    fake_client.solves["t1"] = {"p1", "p2"}
 
-    resp = client.get("/api/intro2/track", headers=auth("player-token"))
+    resp = client.get("/api/intro2/tracks", headers=auth("player-token"))
     assert resp.status_code == 200
-    statuses = {s["challenge_id"]: s["status"] for s in resp.json()}
-    assert statuses == {"i1": "done", "i2": "done", "i3": "in_progress", "i4": "locked"}
+    tracks = {t["category"]: t["steps"] for t in resp.json()}
+    assert set(tracks) == {"pwn", "web"}
+
+    assert {s["challenge_id"]: s["status"] for s in tracks["pwn"]} == {
+        "p1": "done",
+        "p2": "done",
+        "p3": "in_progress",
+    }
+    # web is untouched by pwn's progress: its own step 1 is in progress.
+    assert {s["challenge_id"]: s["status"] for s in tracks["web"]} == {
+        "w1": "in_progress",
+        "w2": "locked",
+    }
+
+
+def test_intro2_numbers_steps_from_one_per_track(
+    client: TestClient, fake_client: FakeRctfClient
+) -> None:
+    """Steps are numbered within their track, not across the whole tag - the
+    page prints "STEP 01" at the top of every category."""
+    fake_client.identities["player-token"] = TeamIdentity("t1", "n1ght0wl", is_admin=False)
+    fake_client.challenges = [
+        {"id": "p1", "name": "a", "category": "pwn", "tags": ["intro2"], "sortWeight": 1},
+        {"id": "p2", "name": "b", "category": "pwn", "tags": ["intro2"], "sortWeight": 2},
+        {"id": "r1", "name": "c", "category": "rev", "tags": ["intro2"], "sortWeight": 1},
+    ]
+
+    tracks = {t["category"]: t["steps"] for t in client.get(
+        "/api/intro2/tracks", headers=auth("player-token")
+    ).json()}
+    assert [s["step"] for s in tracks["pwn"]] == [1, 2]
+    assert [s["step"] for s in tracks["rev"]] == [1]
+
+
+def test_intro2_groups_categories_case_insensitively(
+    client: TestClient, fake_client: FakeRctfClient
+) -> None:
+    """rCTF does not normalise the category an author types, so `Web` and `web`
+    would otherwise be two tracks with two step 1s."""
+    fake_client.identities["player-token"] = TeamIdentity("t1", "n1ght0wl", is_admin=False)
+    fake_client.challenges = [
+        {"id": "w1", "name": "a", "category": "Web", "tags": ["intro2"], "sortWeight": 1},
+        {"id": "w2", "name": "b", "category": " web ", "tags": ["intro2"], "sortWeight": 2},
+    ]
+
+    tracks = client.get("/api/intro2/tracks", headers=auth("player-token")).json()
+    assert [t["category"] for t in tracks] == ["web"]
+    assert [s["challenge_id"] for s in tracks[0]["steps"]] == ["w1", "w2"]
+    # The step keeps rCTF's own casing: it is what the challenge modal opens.
+    assert tracks[0]["steps"][0]["category"] == "Web"
+
+
+def test_intro2_skips_a_challenge_with_no_category(
+    client: TestClient, fake_client: FakeRctfClient
+) -> None:
+    """Category *is* the track now, so a tagged challenge without one has no
+    track to belong to. It is left out rather than inventing a bucket for it."""
+    fake_client.identities["player-token"] = TeamIdentity("t1", "n1ght0wl", is_admin=False)
+    fake_client.challenges = [
+        {"id": "x", "name": "no category", "tags": ["intro2"], "sortWeight": 1},
+        {"id": "y", "name": "null category", "category": None, "tags": ["intro2"], "sortWeight": 2},
+        {"id": "w1", "name": "fine", "category": "web", "tags": ["intro2"], "sortWeight": 3},
+    ]
+
+    tracks = client.get("/api/intro2/tracks", headers=auth("player-token")).json()
+    assert [t["category"] for t in tracks] == ["web"]
+    assert [s["challenge_id"] for s in tracks[0]["steps"]] == ["w1"]
 
 
 def test_intro2_carries_what_the_challenge_modal_needs(
@@ -52,15 +121,16 @@ def test_intro2_carries_what_the_challenge_modal_needs(
             "id": "i1",
             "name": "Your First Flag",
             "description": "Find the flag format.",
-            "category": "intro",
+            "category": "misc",
             "tags": ["intro2"],
             "sortWeight": 1,
             "files": [{"name": "hint.txt", "url": "/uploads/abc/hint.txt", "size": 12}],
         },
     ]
 
-    step = client.get("/api/intro2/track", headers=auth("player-token")).json()[0]
-    assert step["category"] == "intro"
+    tracks = client.get("/api/intro2/tracks", headers=auth("player-token")).json()
+    step = tracks[0]["steps"][0]
+    assert step["category"] == "misc"
     assert step["description"] == "Find the flag format."
     assert step["files"] == [{"name": "hint.txt", "url": "/uploads/abc/hint.txt", "size": 12}]
 
@@ -72,12 +142,13 @@ def test_intro2_tolerates_junk_in_the_files_field(
     must not 500 the whole track."""
     fake_client.identities["player-token"] = TeamIdentity("t1", "n1ght0wl", is_admin=False)
     fake_client.challenges = [
-        {"id": "a", "name": "no files key", "tags": ["intro2"], "sortWeight": 1},
-        {"id": "b", "name": "null", "tags": ["intro2"], "sortWeight": 2, "files": None},
-        {"id": "c", "name": "not a list", "tags": ["intro2"], "sortWeight": 3, "files": "x"},
+        {"id": "a", "name": "no files key", "category": "web", "tags": ["intro2"], "sortWeight": 1},
+        {"id": "b", "name": "null", "category": "web", "tags": ["intro2"], "sortWeight": 2, "files": None},
+        {"id": "c", "name": "not a list", "category": "web", "tags": ["intro2"], "sortWeight": 3, "files": "x"},
         {
             "id": "d",
             "name": "partly usable",
+            "category": "web",
             "tags": ["intro2"],
             "sortWeight": 4,
             "files": [
@@ -88,9 +159,9 @@ def test_intro2_tolerates_junk_in_the_files_field(
         },
     ]
 
-    resp = client.get("/api/intro2/track", headers=auth("player-token"))
+    resp = client.get("/api/intro2/tracks", headers=auth("player-token"))
     assert resp.status_code == 200
-    steps = {s["challenge_id"]: s["files"] for s in resp.json()}
+    steps = {s["challenge_id"]: s["files"] for s in resp.json()[0]["steps"]}
     assert steps["a"] == [] and steps["b"] == [] and steps["c"] == []
     assert steps["d"] == [{"name": "ok.txt", "url": "/uploads/a/ok.txt", "size": None}]
 
@@ -105,11 +176,11 @@ def test_intro2_is_empty_on_a_v1_shaped_response(
     the one that says why the page went blank."""
     fake_client.identities["player-token"] = TeamIdentity("t1", "n1ght0wl", is_admin=False)
     fake_client.challenges = [
-        {"id": "i1", "name": "Your First Flag", "sortWeight": 1},
-        {"id": "i2", "name": "Inspect Element", "sortWeight": 2},
+        {"id": "i1", "name": "Your First Flag", "category": "web", "sortWeight": 1},
+        {"id": "i2", "name": "Inspect Element", "category": "web", "sortWeight": 2},
     ]
 
-    resp = client.get("/api/intro2/track", headers=auth("player-token"))
+    resp = client.get("/api/intro2/tracks", headers=auth("player-token"))
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -123,16 +194,17 @@ def test_intro2_sorts_when_v2_sends_null_sort_weights(
     an int - that would be a 500 on this endpoint."""
     fake_client.identities["player-token"] = TeamIdentity("t1", "n1ght0wl", is_admin=False)
     fake_client.challenges = [
-        {"id": "b", "name": "beta", "tags": ["intro2"], "sortWeight": None},
-        {"id": "c", "name": "gamma", "tags": ["intro2"], "sortWeight": 2},
-        {"id": "a", "name": "alpha", "tags": ["intro2"], "sortWeight": None},
+        {"id": "b", "name": "beta", "category": "rev", "tags": ["intro2"], "sortWeight": None},
+        {"id": "c", "name": "gamma", "category": "rev", "tags": ["intro2"], "sortWeight": 2},
+        {"id": "a", "name": "alpha", "category": "rev", "tags": ["intro2"], "sortWeight": None},
     ]
 
-    resp = client.get("/api/intro2/track", headers=auth("player-token"))
+    resp = client.get("/api/intro2/tracks", headers=auth("player-token"))
     assert resp.status_code == 200
+    steps = resp.json()[0]["steps"]
     # Null weights collapse to 0 and therefore sort first, tie-broken by name.
-    assert [s["challenge_id"] for s in resp.json()] == ["a", "b", "c"]
-    assert [s["step"] for s in resp.json()] == [1, 2, 3]
+    assert [s["challenge_id"] for s in steps] == ["a", "b", "c"]
+    assert [s["step"] for s in steps] == [1, 2, 3]
 
 
 def test_intro2_tolerates_v2_null_tags(
@@ -142,13 +214,13 @@ def test_intro2_tolerates_v2_null_tags(
     key. Both have to read as "not on the track"."""
     fake_client.identities["player-token"] = TeamIdentity("t1", "n1ght0wl", is_admin=False)
     fake_client.challenges = [
-        {"id": "x", "name": "untagged", "tags": None, "sortWeight": None},
-        {"id": "i1", "name": "step one", "tags": ["intro2"], "sortWeight": 1},
+        {"id": "x", "name": "untagged", "category": "web", "tags": None, "sortWeight": None},
+        {"id": "i1", "name": "step one", "category": "web", "tags": ["intro2"], "sortWeight": 1},
     ]
 
-    resp = client.get("/api/intro2/track", headers=auth("player-token"))
+    resp = client.get("/api/intro2/tracks", headers=auth("player-token"))
     assert resp.status_code == 200
-    assert [s["challenge_id"] for s in resp.json()] == ["i1"]
+    assert [s["challenge_id"] for s in resp.json()[0]["steps"]] == ["i1"]
 
 
 def test_decks_crud_requires_admin_for_writes(client: TestClient, fake_client: FakeRctfClient) -> None:

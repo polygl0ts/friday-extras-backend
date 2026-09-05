@@ -50,7 +50,9 @@ class WriteupCardOut(BaseModel):
     voted: bool = False
 
     @classmethod
-    def for_viewer(cls, writeup: Writeup, *, votes: int, voted: bool) -> "WriteupCardOut":
+    def for_viewer(
+        cls, writeup: Writeup, *, votes: int, voted: bool
+    ) -> "WriteupCardOut":
         return cls(
             id=writeup.id,
             challenge_id=writeup.challenge_id,
@@ -193,6 +195,13 @@ class Intro2StepOut(BaseModel):
     # uses - without these it could show a step but not let anyone solve it.
     category: str = ""
     files: list[Intro2FileOut] = []
+
+
+class Intro2TrackOut(BaseModel):
+    """One category's INTRO2 track."""
+
+    category: str
+    steps: list[Intro2StepOut] = []
 
 
 class AdminStatsOut(BaseModel):

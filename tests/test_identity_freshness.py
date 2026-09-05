@@ -25,7 +25,15 @@ BODY = {"body_md": "intro\n:::solution\nthe answer", "summary": "s"}
 def fake() -> FakeRctfClient:
     f = FakeRctfClient()
     f.identities["tok"] = TeamIdentity("t1", "n1ght0wl", is_admin=False)
-    f.challenges = [{"id": "c1", "name": "cookie_monster", "tags": ["intro2"], "sortWeight": 1}]
+    f.challenges = [
+        {
+            "id": "c1",
+            "name": "cookie_monster",
+            "category": "web",
+            "tags": ["intro2"],
+            "sortWeight": 1,
+        }
+    ]
     app.dependency_overrides[get_rctf_client] = lambda: f
     yield f
     app.dependency_overrides.clear()
@@ -58,9 +66,9 @@ def test_the_intro2_track_advances_right_after_solving(client, fake) -> None:
     _warm_the_cache(client)
     fake.solves["t1"] = {"c1"}
 
-    track = client.get("/api/intro2/track", headers=HEADERS).json()
+    tracks = client.get("/api/intro2/tracks", headers=HEADERS).json()
 
-    assert [s["status"] for s in track] == ["done"]
+    assert [s["status"] for t in tracks for s in t["steps"]] == ["done"]
 
 
 def test_submission_is_still_refused_when_the_challenge_really_is_unsolved(client, fake) -> None:
