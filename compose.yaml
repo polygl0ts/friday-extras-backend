@@ -3,13 +3,20 @@ services:
     image: ghcr.io/polygl0ts/friday-extras-backend:main
     build: .
     environment:
-      EXTRAS_RCTF_ORIGIN: "http://localhost:8090"
-      EXTRAS_DATABASE_URL: "sqlite:////data/friday-extras.db"
+      EXTRAS_RCTF_ORIGIN: "${EXTRAS_RCTF_ORIGIN:-http://host.docker.internal:8090}"
+      EXTRAS_RCTF_ADMIN_TOKEN: "${EXTRAS_RCTF_ADMIN_TOKEN:-}"
+      EXTRAS_DATABASE_URL: "sqlite:////data/friday-extras-backend.db"
       EXTRAS_CORS_ORIGINS: '["http://localhost:5173"]'
       EXTRAS_WEB_ORIGIN: "http://localhost:5173"
+      EXTRAS_DISCORD_WEBHOOK_URL: "${EXTRAS_DISCORD_WEBHOOK_URL:-}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      - ./data:/data
+      - extras-data:/data
+    ports:
+      - "127.0.0.1:8091:8000"
     restart: unless-stopped
     init: true
-    ports:
-        - "8091:8000"
+
+volumes:
+  extras-data:
