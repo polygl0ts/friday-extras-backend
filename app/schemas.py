@@ -189,6 +189,7 @@ class Intro2StepOut(BaseModel):
     challenge_id: str
     step: int
     title: str
+    author: str = ""
     description: str
     status: str  # "done" | "in_progress" | "locked"
     # Carried so the INTRO2 page can open the same challenge modal the grid

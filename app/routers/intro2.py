@@ -50,6 +50,7 @@ def _steps(challs: list[dict[str, Any]], solved: frozenset[str]) -> list[Intro2S
                 challenge_id=chall_id,
                 step=index,
                 title=chall.get("name", chall_id),
+                author=str(chall.get("author") or ""),
                 description=chall.get("description", ""),
                 status=state,
                 category=str(chall.get("category") or ""),
