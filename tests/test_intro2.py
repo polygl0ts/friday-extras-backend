@@ -223,29 +223,6 @@ def test_intro2_tolerates_v2_null_tags(
     assert [s["challenge_id"] for s in resp.json()[0]["steps"]] == ["i1"]
 
 
-def test_decks_crud_requires_admin_for_writes(client: TestClient, fake_client: FakeRctfClient) -> None:
-    fake_client.identities["admin-token"] = TeamIdentity("t1", "admin", is_admin=True)
-    fake_client.identities["player-token"] = TeamIdentity("t2", "n1ght0wl", is_admin=False)
-
-    forbidden = client.post(
-        "/api/decks",
-        json={"title": "Web 101", "meta": "24 slides", "file_url": "https://x/y.pdf"},
-        headers=auth("player-token"),
-    )
-    assert forbidden.status_code == 403
-
-    created = client.post(
-        "/api/decks",
-        json={"title": "Web 101", "meta": "24 slides", "file_url": "https://x/y.pdf"},
-        headers=auth("admin-token"),
-    )
-    assert created.status_code == 200
-
-    listed = client.get("/api/decks")
-    assert len(listed.json()) == 1
-    assert listed.json()[0]["title"] == "Web 101"
-
-
 def test_discord_config_roundtrip(client: TestClient, fake_client: FakeRctfClient) -> None:
     fake_client.identities["admin-token"] = TeamIdentity("t1", "admin", is_admin=True)
 
@@ -285,22 +262,3 @@ def test_admin_stats(client: TestClient, fake_client: FakeRctfClient) -> None:
     assert stats.status_code == 200
     body = stats.json()
     assert body == {"submissions": 1, "pending_writeups": 1}
-
-
-def test_patching_a_deck_leaves_omitted_fields_alone(
-    client: TestClient, fake_client: FakeRctfClient
-) -> None:
-    fake_client.identities["admin-token"] = TeamIdentity("t1", "admin", is_admin=True)
-    created = client.post(
-        "/api/decks",
-        json={"title": "Web 101", "meta": "24 slides", "file_url": "https://x/y.pdf", "sort_order": 3},
-        headers=auth("admin-token"),
-    ).json()
-
-    patched = client.patch(
-        f"/api/decks/{created['id']}",
-        json={"title": "Web 102"},
-        headers=auth("admin-token"),
-    )
-    assert patched.status_code == 200
-    assert patched.json() == {**created, "title": "Web 102"}

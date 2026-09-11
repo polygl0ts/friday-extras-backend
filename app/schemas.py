@@ -131,28 +131,6 @@ class WriteupOut(BaseModel):
         )
 
 
-class DeckIn(BaseModel):
-    title: str
-    meta: str = ""
-    file_url: str
-    sort_order: int = 0
-
-
-class DeckPatch(BaseModel):
-    # Every field optional: a PATCH that omits one must leave it alone, not
-    # reset it to `DeckIn`'s default.
-    title: Optional[str] = None
-    meta: Optional[str] = None
-    file_url: Optional[str] = None
-    sort_order: Optional[int] = None
-
-
-class DeckOut(DeckIn):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-
-
 class DiscordConfigOut(BaseModel):
     # Deliberately no URL: it is a credential injected from the vault, and an
     # admin-readable endpoint that echoes one back is how it leaks. Callers

@@ -49,7 +49,9 @@ class Writeup(SQLModel, table=True):
     status: WriteupStatus = Field(default=WriteupStatus.pending, index=True)
     created_at: datetime = Field(default_factory=_utcnow, sa_column=_utc_column())
     reviewed_by: Optional[str] = None
-    reviewed_at: Optional[datetime] = Field(default=None, sa_column=_utc_column(nullable=True))
+    reviewed_at: Optional[datetime] = Field(
+        default=None, sa_column=_utc_column(nullable=True)
+    )
     reject_reason: Optional[str] = None
 
 
@@ -66,14 +68,6 @@ class WriteupVote(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow, sa_column=_utc_column())
 
 
-class Deck(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    title: str
-    meta: str = ""
-    file_url: str
-    sort_order: int = 0
-
-
 class DiscordConfig(SQLModel, table=True):
     """Where notifications go. One webhook, no per-event switches.
 
@@ -87,13 +81,3 @@ class DiscordConfig(SQLModel, table=True):
     # API: settable via PUT, never returned by GET, so it cannot leak back out
     # to a client. Empty means "fall back to settings.discord_webhook_url".
     webhook_url: str = ""
-
-
-# There is deliberately no first-blood table here any more. It used to cache
-# `{challenge_id: solver_name}` for the challenge grid's 🩸 marker, filled by a
-# background poller. rCTF v2 answers that directly and publicly on
-# `/v2/leaderboard/challs` (`firstSolvers`, ordered, index 0 is the blood), and
-# recomputes it on every accepted flag - so the cache was a copy of upstream's
-# answer that could only ever drift from it (an admin deleting a cheated solve
-# corrected rCTF and not us). The frontend reads rCTF for this now; see
-# `_REMOVED_TABLES` in app/db.py for the leftover table.
