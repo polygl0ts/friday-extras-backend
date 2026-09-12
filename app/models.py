@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import JSON, Column, DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -66,6 +66,35 @@ class WriteupVote(SQLModel, table=True):
     writeup_id: int = Field(foreign_key="writeup.id", primary_key=True)
     team_id: str = Field(primary_key=True)
     created_at: datetime = Field(default_factory=_utcnow, sa_column=_utc_column())
+
+
+GRADE_MIN = 1
+GRADE_MAX = 5
+RATED_CRITERIA: tuple[str, ...] = (
+    "technical",
+    "clarity",
+    "completeness",
+    "originality",
+    "narrative",
+)
+CHECK_CRITERIA: tuple[str, ...] = ("reproducibility", "format")
+
+
+def sheet_score(scores: dict) -> float:
+    """One sheet collapsed to a number on the rated scale."""
+    grades: list[int] = [
+        (GRADE_MAX if value else GRADE_MIN) if isinstance(value, bool) else int(value)
+        for value in scores.values()
+    ]
+    return sum(grades) / len(grades)
+
+
+class WriteupGrade(SQLModel, table=True):
+    """One admin's grading sheet for one writeup."""
+
+    writeup_id: int = Field(foreign_key="writeup.id", primary_key=True)
+    grader_team_id: str = Field(primary_key=True)
+    scores: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
 
 
 class DiscordConfig(SQLModel, table=True):

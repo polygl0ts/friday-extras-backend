@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,10 +12,22 @@ from app import discord
 from app.auth import get_current_identity, get_fresh_identity, require_admin
 from app.config import settings
 from app.db import get_session
-from app.models import Writeup, WriteupStatus, WriteupVote
+from app.models import (
+    CHECK_CRITERIA,
+    GRADE_MAX,
+    GRADE_MIN,
+    RATED_CRITERIA,
+    Writeup,
+    WriteupGrade,
+    WriteupStatus,
+    WriteupVote,
+)
 from app.rctf_client import RctfClient, TeamIdentity, get_rctf_client
 from app.schemas import (
+    GradeSummary,
+    GradingCriteriaOut,
     WriteupCardOut,
+    WriteupGradeRequest,
     WriteupOut,
     WriteupRejectRequest,
     WriteupSubmitRequest,
@@ -51,9 +64,7 @@ def _split_or_422(body_md: str) -> tuple[str, str]:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
 
 
-def _vote_state(
-    session: Session, team_id: str
-) -> tuple[dict[int, int], set[int]]:
+def _vote_state(session: Session, team_id: str) -> tuple[dict[int, int], set[int]]:
     """(votes per writeup, the ids this team voted for).
 
     Two aggregate queries for the whole page rather than a count per writeup.
@@ -62,7 +73,9 @@ def _vote_state(
     """
     counts: dict[int, int] = dict(
         session.exec(
-            select(WriteupVote.writeup_id, func.count()).group_by(WriteupVote.writeup_id)
+            select(WriteupVote.writeup_id, func.count()).group_by(
+                WriteupVote.writeup_id
+            )
         ).all()
     )
     mine: set[int] = set(
@@ -71,6 +84,23 @@ def _vote_state(
         ).all()
     )
     return counts, mine
+
+
+def _grade_state(session: Session) -> dict[int, list[WriteupGrade]]:
+    """Every sheet, grouped by writeup, in one query."""
+    sheets: dict[int, list[WriteupGrade]] = defaultdict(list)
+    grade: WriteupGrade
+    for grade in session.exec(select(WriteupGrade)):
+        sheets[grade.writeup_id].append(grade)
+    return sheets
+
+
+def _grading(
+    sheets: dict[int, list[WriteupGrade]], writeup_id: int, identity: TeamIdentity
+) -> GradeSummary:
+    return GradeSummary.of(
+        sheets.get(writeup_id, []), team_id=identity.team_id, is_admin=identity.is_admin
+    )
 
 
 def _viewer_flags(writeup: Writeup, identity: TeamIdentity) -> tuple[bool, bool]:
@@ -163,13 +193,21 @@ def list_writeups(
         query = query.where(Writeup.challenge_id == challenge_id)
 
     counts, mine = _vote_state(session, identity.team_id)
+    sheets = _grade_state(session)
     writeups: list[Writeup] = list(session.exec(query))
     writeups.sort(
-        key=lambda w: (counts.get(w.id, 0), w.created_at) if sort == "top" else (w.created_at,),
+        key=lambda w: (
+            (counts.get(w.id, 0), w.created_at) if sort == "top" else (w.created_at,)
+        ),
         reverse=True,
     )
     return [
-        WriteupCardOut.for_viewer(w, votes=counts.get(w.id, 0), voted=w.id in mine)
+        WriteupCardOut.for_viewer(
+            w,
+            votes=counts.get(w.id, 0),
+            voted=w.id in mine,
+            grading=_grading(sheets, w.id, identity),
+        )
         for w in writeups
     ]
 
@@ -187,25 +225,39 @@ def my_writeups(
         )
     )
     counts, _mine = _vote_state(session, identity.team_id)
+    sheets = _grade_state(session)
     # Your own writeups, including why any of them were turned down, and how
     # they landed with everyone else. `voted` stays false - you can't vote for
     # your own, so there is nothing to reflect back.
     return [
-        WriteupOut.for_viewer(w, unlocked=True, owner_view=True, votes=counts.get(w.id, 0))
+        WriteupOut.for_viewer(
+            w,
+            unlocked=True,
+            owner_view=True,
+            votes=counts.get(w.id, 0),
+            grading=_grading(sheets, w.id, identity),
+        )
         for w in writeups
     ]
 
 
 @router.get("/queue", response_model=list[WriteupOut])
 def writeup_queue(
-    _: TeamIdentity = Depends(require_admin),
+    identity: TeamIdentity = Depends(require_admin),
     session: Session = Depends(get_session),
 ) -> list[WriteupOut]:
     pending: ScalarResult[Writeup] = session.exec(
         select(Writeup).where(Writeup.status == WriteupStatus.pending)
     )
-    # Admins review the whole document, both halves.
-    return [WriteupOut.for_viewer(w, unlocked=True, owner_view=True) for w in pending]
+    sheets = _grade_state(session)
+    # Admins review the whole document, both halves - and grade it from the
+    # same page, hence the sheets.
+    return [
+        WriteupOut.for_viewer(
+            w, unlocked=True, owner_view=True, grading=_grading(sheets, w.id, identity)
+        )
+        for w in pending
+    ]
 
 
 # `/item/{id}` rather than `/{id}`: writeup ids and challenge ids are both
@@ -233,6 +285,7 @@ async def read_writeup(
         owner_view=owner_view,
         votes=counts.get(writeup.id, 0),
         voted=writeup.id in mine,
+        grading=_grading(_grade_state(session), writeup.id, identity),
     )
 
 
@@ -252,7 +305,9 @@ def _apply_vote(
     if writeup is None or writeup.status != WriteupStatus.published:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Writeup not found")
     if writeup.team_id == identity.team_id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upvote your own writeup")
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "You can't upvote your own writeup"
+        )
 
     # A concurrent request may reach the state first, between the lookup below
     # and the commit. That is the state we wanted, so it is not an error.
@@ -280,6 +335,7 @@ def _apply_vote(
         owner_view=owner_view,
         votes=counts.get(writeup_id, 0),
         voted=writeup_id in mine,
+        grading=_grading(_grade_state(session), writeup_id, identity),
     )
 
 
@@ -301,6 +357,62 @@ def remove_vote(
     session: Session = Depends(get_session),
 ) -> WriteupOut:
     return _apply_vote(writeup_id, False, identity, session)
+
+
+@router.get("/criteria", response_model=GradingCriteriaOut)
+def grading_criteria(_: TeamIdentity = Depends(require_admin)) -> GradingCriteriaOut:
+    """The shape of a grading sheet, for the admin form to render itself from."""
+    return GradingCriteriaOut(
+        rated=list(RATED_CRITERIA),
+        checks=list(CHECK_CRITERIA),
+        min=GRADE_MIN,
+        max=GRADE_MAX,
+    )
+
+
+# PUT, not POST: the sheet is addressed by (writeup, admin), and sending it
+# again replaces it - which is how an admin changes their mind.
+@router.put("/item/{writeup_id}/grade", response_model=WriteupOut)
+def grade_writeup(
+    writeup_id: int,
+    body: WriteupGradeRequest,
+    identity: TeamIdentity = Depends(require_admin),
+    session: Session = Depends(get_session),
+) -> WriteupOut:
+    """Store this admin's sheet for the writeup, replacing any earlier one."""
+    writeup: Writeup | None = session.get(Writeup, writeup_id)
+    if writeup is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Writeup not found")
+
+    grade: WriteupGrade | None = session.get(
+        WriteupGrade, (writeup_id, identity.team_id)
+    )
+    if grade is None:
+        grade = WriteupGrade(writeup_id=writeup_id, grader_team_id=identity.team_id)
+    grade.scores = body.scores
+    session.add(grade)
+    try:
+        session.commit()
+    except IntegrityError:
+        # The same admin's other request inserted first. Last write wins, as
+        # it would have had the two arrived a second apart.
+        session.rollback()
+        existing: WriteupGrade = session.get(
+            WriteupGrade, (writeup_id, identity.team_id)
+        )
+        existing.scores = body.scores
+        session.add(existing)
+        session.commit()
+
+    counts, mine = _vote_state(session, identity.team_id)
+    return WriteupOut.for_viewer(
+        writeup,
+        unlocked=True,
+        owner_view=True,
+        votes=counts.get(writeup_id, 0),
+        voted=writeup_id in mine,
+        grading=_grading(_grade_state(session), writeup_id, identity),
+    )
 
 
 @router.put("/item/{writeup_id}", response_model=WriteupOut)
@@ -419,7 +531,7 @@ async def reject_writeup(
 async def delete_writeup(
     writeup_id: int,
     identity: TeamIdentity = Depends(require_admin),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
 ) -> WriteupOut:
     """
     Sends the writeup back to pending state, sends discord notification along.
@@ -450,7 +562,7 @@ async def delete_writeup(
             "Challenge": writeup.challenge_name,
             "Author": writeup.team_name,
             "Status": "Sends back by admin.",
-            "Removed by": identity.team_name
+            "Removed by": identity.team_name,
         },
         url=_review_url(),
     )

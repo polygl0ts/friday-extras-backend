@@ -1,9 +1,26 @@
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    field_validator,
+)
 
-from app.models import Writeup, WriteupStatus
+from app.models import (
+    CHECK_CRITERIA,
+    GRADE_MAX,
+    GRADE_MIN,
+    RATED_CRITERIA,
+    Writeup,
+    WriteupGrade,
+    WriteupStatus,
+    sheet_score,
+)
 from app.writeup_md import scrub_flags
 
 
@@ -31,6 +48,79 @@ class WriteupRejectRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class WriteupGradeRequest(BaseModel):
+    """One complete grading sheet."""
+
+    scores: dict[str, StrictInt | StrictBool]
+
+    @field_validator("scores")
+    @classmethod
+    def _complete_sheet(cls, scores: dict[str, int | bool]) -> dict[str, int | bool]:
+        expected = set(RATED_CRITERIA) | set(CHECK_CRITERIA)
+        if set(scores) != expected:
+            missing = sorted(expected - set(scores))
+            extra = sorted(set(scores) - expected)
+            raise ValueError(
+                f"sheet must have exactly {sorted(expected)}; missing {missing}, unexpected {extra}"
+            )
+        for name in RATED_CRITERIA:
+            value = scores[name]
+            if isinstance(value, bool) or not GRADE_MIN <= value <= GRADE_MAX:
+                raise ValueError(
+                    f"{name} must be an integer from {GRADE_MIN} to {GRADE_MAX}"
+                )
+        for name in CHECK_CRITERIA:
+            if not isinstance(scores[name], bool):
+                raise ValueError(f"{name} must be true or false")
+        return scores
+
+
+class GradingCriteriaOut(BaseModel):
+    """What a sheet looks like, so the frontend builds the form from here
+    rather than keeping its own copy of the criteria list."""
+
+    rated: list[str]
+    checks: list[str]
+    min: int
+    max: int
+
+
+class WriteupGradeOut(BaseModel):
+    grader_team_id: str
+    scores: dict[str, int | bool]
+
+
+class GradeSummary(BaseModel):
+    """A writeup's sheets, as seen by one viewer."""
+
+    score: Optional[float] = None
+    graders: int = 0
+    my_grade: Optional[dict[str, int | bool]] = None
+    grades: Optional[list[WriteupGradeOut]] = None
+
+    @classmethod
+    def of(
+        cls, sheets: list[WriteupGrade], *, team_id: str, is_admin: bool
+    ) -> "GradeSummary":
+        score = (
+            round(sum(sheet_score(g.scores) for g in sheets) / len(sheets), 2)
+            if sheets
+            else None
+        )
+        if not is_admin:
+            return cls(score=score, graders=len(sheets))
+        mine = next((g.scores for g in sheets if g.grader_team_id == team_id), None)
+        return cls(
+            score=score,
+            graders=len(sheets),
+            my_grade=mine,
+            grades=[
+                WriteupGradeOut(grader_team_id=g.grader_team_id, scores=g.scores)
+                for g in sheets
+            ],
+        )
+
+
 class WriteupCardOut(BaseModel):
     """Grid view. Carries no body at all, so listing every published writeup
     to everyone is safe regardless of who solved what."""
@@ -48,11 +138,19 @@ class WriteupCardOut(BaseModel):
     votes: int = 0
     #: Whether the requesting team has upvoted this one.
     voted: bool = False
+    score: Optional[float] = None
+    graders: int = 0
 
     @classmethod
     def for_viewer(
-        cls, writeup: Writeup, *, votes: int, voted: bool
+        cls,
+        writeup: Writeup,
+        *,
+        votes: int,
+        voted: bool,
+        grading: Optional[GradeSummary] = None,
     ) -> "WriteupCardOut":
+        grading = grading or GradeSummary()
         return cls(
             id=writeup.id,
             challenge_id=writeup.challenge_id,
@@ -61,6 +159,8 @@ class WriteupCardOut(BaseModel):
             created_at=writeup.created_at,
             votes=votes,
             voted=voted,
+            score=grading.score,
+            graders=grading.graders,
         )
 
 
@@ -88,6 +188,10 @@ class WriteupOut(BaseModel):
     reject_reason: Optional[str] = None
     votes: int = 0
     voted: bool = False
+    score: Optional[float] = None
+    graders: int = 0
+    my_grade: Optional[dict[str, int | bool]] = None
+    grades: Optional[list[WriteupGradeOut]] = None
 
     @classmethod
     def for_viewer(
@@ -98,19 +202,10 @@ class WriteupOut(BaseModel):
         owner_view: bool,
         votes: int = 0,
         voted: bool = False,
+        grading: Optional[GradeSummary] = None,
     ) -> "WriteupOut":
-        """The one place a writeup is turned into a response.
-
-        This function *is* the redaction boundary: `solution_md` is read out
-        of the row only when `unlocked`, so gated bytes never reach the
-        serializer, let alone the wire. Every route goes through here; nothing
-        builds a `WriteupOut` any other way, and a test asserts the gated text
-        appears nowhere in a locked response.
-
-        `unlocked` - the viewer solved the challenge, wrote this writeup, or
-        is an admin reviewing it. `owner_view` - author or admin, who may see
-        why a writeup was rejected.
-        """
+        """The one place a writeup is turned into a response."""
+        grading = grading or GradeSummary()
         return cls(
             id=writeup.id,
             challenge_id=writeup.challenge_id,
@@ -128,6 +223,10 @@ class WriteupOut(BaseModel):
             reject_reason=writeup.reject_reason if owner_view else None,
             votes=votes,
             voted=voted,
+            score=grading.score,
+            graders=grading.graders,
+            my_grade=grading.my_grade,
+            grades=grading.grades,
         )
 
 
