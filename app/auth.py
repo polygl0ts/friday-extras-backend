@@ -94,6 +94,25 @@ async def get_current_identity(
     return await _identity(authorization, client, force=False)
 
 
+#: Who an anonymous visitor is: no team, no solves, no admin rights. Every
+#: gate that reads an identity already falls closed for it.
+GUEST = TeamIdentity(team_id="", team_name="", is_admin=False)
+
+
+async def get_optional_identity(
+    authorization: Optional[str] = Header(default=None),
+    client: RctfClient = Depends(get_rctf_client),
+) -> TeamIdentity:
+    """`get_current_identity` for public routes: no header means a guest.
+
+    A header that is present but invalid is still a 401, so a player whose
+    session broke is told so instead of silently being shown the guest view.
+    """
+    if authorization is None:
+        return GUEST
+    return await _identity(authorization, client, force=False)
+
+
 async def get_fresh_identity(
     authorization: Optional[str] = Header(default=None),
     client: RctfClient = Depends(get_rctf_client),

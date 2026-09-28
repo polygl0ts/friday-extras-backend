@@ -9,7 +9,12 @@ from sqlmodel import Session, func, select
 from sqlmodel.sql.expression import SelectOfScalar
 
 from app import discord
-from app.auth import get_current_identity, get_fresh_identity, require_admin
+from app.auth import (
+    get_current_identity,
+    get_fresh_identity,
+    get_optional_identity,
+    require_admin,
+)
 from app.config import settings
 from app.db import get_session
 from app.models import (
@@ -172,13 +177,13 @@ async def submit_writeup(
 def list_writeups(
     challenge_id: str | None = None,
     sort: str = Query(default="new", pattern="^(new|top)$"),
-    identity: TeamIdentity = Depends(get_current_identity),
+    identity: TeamIdentity = Depends(get_optional_identity),
     session: Session = Depends(get_session),
 ) -> list[WriteupCardOut]:
     """Every published writeup, for the grid.
 
     Deliberately unfiltered by solve state: a writeup's existence, challenge,
-    author and summary are public to anyone logged in - only its gated half
+    author and summary are public, logged in or not - only its gated half
     isn't. Cards carry no body, so this needs no rCTF round trip at all.
 
     `sort=new` (the default) is newest-first; `sort=top` ranks by upvotes and
@@ -265,7 +270,7 @@ def writeup_queue(
 @router.get("/item/{writeup_id}", response_model=WriteupOut)
 async def read_writeup(
     writeup_id: int,
-    identity: TeamIdentity = Depends(get_current_identity),
+    identity: TeamIdentity = Depends(get_optional_identity),
     session: Session = Depends(get_session),
 ) -> WriteupOut:
     writeup: Writeup | None = session.get(Writeup, writeup_id)
