@@ -250,36 +250,6 @@ class DiscordTestResult(BaseModel):
     detail: str
 
 
-class Intro2FileOut(BaseModel):
-    """A challenge attachment, passed through from rCTF's v2 challenge list.
-
-    `url` is whatever rCTF reported: origin-relative for the local upload
-    provider, absolute for the S3/GCS ones. The frontend resolves it.
-    """
-
-    name: str
-    url: str
-    size: Optional[int] = None
-
-
-class Intro2StepOut(BaseModel):
-    challenge_id: str
-    step: int
-    title: str
-    author: str = ""
-    description: str
-    status: str  # "done" | "in_progress" | "locked"
-    # Carried so the INTRO2 page can open the same challenge modal the grid
-    # uses - without these it could show a step but not let anyone solve it.
-    category: str = ""
-    files: list[Intro2FileOut] = []
-
-
-class Intro2TrackOut(BaseModel):
-    """One category's INTRO2 track."""
-
-    category: str
-    steps: list[Intro2StepOut] = []
 
 
 class AdminStatsOut(BaseModel):

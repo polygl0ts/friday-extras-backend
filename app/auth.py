@@ -103,10 +103,9 @@ async def get_fresh_identity(
     For routes where a stale `solved_challenge_ids` would be *wrong* rather
     than merely dated. The solve set now rides along on the cached identity, so
     without this a team that solved a challenge seconds ago would be told to
-    "solve this challenge before posting a writeup", and the INTRO2 track would
-    refuse to advance - for up to `identity_cache_seconds`. Both are refetched
-    by the frontend immediately after a correct flag, which is exactly when the
-    cache is guaranteed to be behind.
+    "solve this challenge before posting a writeup" - for up to
+    `identity_cache_seconds`. The frontend refetches immediately after a
+    correct flag, which is exactly when the cache is guaranteed to be behind.
 
     Costs one request, which is what these routes paid anyway when solve state
     was its own `/users/:id` call.
