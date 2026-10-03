@@ -7,7 +7,7 @@ from app.auth import get_current_identity
 from app.config import settings
 from app.db import create_db_and_tables
 from app.rctf_client import TeamIdentity
-from app.routers import admin, decks, intro2, writeups
+from app.routers import admin, decks, events, intro2, writeups
 
 
 @asynccontextmanager
@@ -28,6 +28,7 @@ app.add_middleware(
 
 app.include_router(writeups.router, prefix="/api")
 app.include_router(decks.router, prefix="/api")
+app.include_router(events.router, prefix="/api")
 app.include_router(intro2.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 

@@ -153,6 +153,20 @@ class DeckOut(DeckIn):
     id: int
 
 
+class EventIn(BaseModel):
+    title: str
+    starts_at: datetime
+    location: str = ""
+    description: str = ""
+
+
+class EventOut(EventIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    starts_at: UtcDatetime
+
+
 class DiscordConfigOut(BaseModel):
     # Deliberately no URL: it is a credential injected from the vault, and an
     # admin-readable endpoint that echoes one back is how it leaks. Callers

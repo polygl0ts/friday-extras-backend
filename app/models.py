@@ -74,6 +74,14 @@ class Deck(SQLModel, table=True):
     sort_order: int = 0
 
 
+class Event(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    starts_at: datetime = Field(sa_column=_utc_column())
+    location: str = ""
+    description: str = ""
+
+
 class DiscordConfig(SQLModel, table=True):
     """Where notifications go. One webhook, no per-event switches.
 
