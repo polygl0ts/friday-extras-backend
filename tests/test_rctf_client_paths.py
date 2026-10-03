@@ -3,8 +3,7 @@
 rCTF's v2 is additive, not a replacement. The two routes never re-issued
 (`auth/login`, `challs/:id/submit`) are browser-side, so this service runs
 entirely on v2 - but the challenge list is *wrong* on anything else (v1's
-response schema strips `tags`, which carries the INTRO2 marker and the grid
-tier), so it pins v2 itself rather than following the configured base. "Which
+response schema strips `tags`, which carries the grid tier), so it pins v2 itself rather than following the configured base. "Which
 base does this call use" is exactly the kind of thing a later refactor flips by
 accident, hence a test per call.
 
@@ -61,8 +60,7 @@ def client():
 
 def test_challenge_list_uses_v2(client, calls):
     """The whole point: `tags` is stripped from v1's response by its own schema,
-    so reading the list over v1 leaves INTRO2 permanently empty and every
-    challenge untiered."""
+    so reading the list over v1 leaves every challenge untiered."""
     asyncio.run(client.list_challenges())
     assert calls == [f"{ORIGIN}/api/v2/challs"]
 

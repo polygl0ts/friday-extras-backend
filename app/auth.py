@@ -94,6 +94,25 @@ async def get_current_identity(
     return await _identity(authorization, client, force=False)
 
 
+#: Who an anonymous visitor is: no team, no solves, no admin rights. Every
+#: gate that reads an identity already falls closed for it.
+GUEST = TeamIdentity(team_id="", team_name="", is_admin=False)
+
+
+async def get_optional_identity(
+    authorization: Optional[str] = Header(default=None),
+    client: RctfClient = Depends(get_rctf_client),
+) -> TeamIdentity:
+    """`get_current_identity` for public routes: no header means a guest.
+
+    A header that is present but invalid is still a 401, so a player whose
+    session broke is told so instead of silently being shown the guest view.
+    """
+    if authorization is None:
+        return GUEST
+    return await _identity(authorization, client, force=False)
+
+
 async def get_fresh_identity(
     authorization: Optional[str] = Header(default=None),
     client: RctfClient = Depends(get_rctf_client),
@@ -103,10 +122,9 @@ async def get_fresh_identity(
     For routes where a stale `solved_challenge_ids` would be *wrong* rather
     than merely dated. The solve set now rides along on the cached identity, so
     without this a team that solved a challenge seconds ago would be told to
-    "solve this challenge before posting a writeup", and the INTRO2 track would
-    refuse to advance - for up to `identity_cache_seconds`. Both are refetched
-    by the frontend immediately after a correct flag, which is exactly when the
-    cache is guaranteed to be behind.
+    "solve this challenge before posting a writeup" - for up to
+    `identity_cache_seconds`. The frontend refetches immediately after a
+    correct flag, which is exactly when the cache is guaranteed to be behind.
 
     Costs one request, which is what these routes paid anyway when solve state
     was its own `/users/:id` call.

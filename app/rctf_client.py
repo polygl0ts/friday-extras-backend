@@ -157,11 +157,11 @@ class RctfClient:
     async def list_challenges(self) -> list[dict]:
         """Challenge list, from **v2 specifically** rather than `_base`.
 
-        `tags` - which carries the INTRO2 marker and the grid tier - exists
+        `tags` - which carries the grid tier - exists
         only on v2. The v1 handler does spread it into its payload, but v1's
         response schema has no `tags` field and rCTF re-parses every response
-        against that schema on the way out, so on v1 it is silently stripped
-        and the INTRO2 track is permanently empty. v2 also types it as
+        against that schema on the way out, so on v1 it is silently stripped.
+        v2 also types it as
         `string[] | null` (key always present), hence the `or []` guards at the
         call sites.
 

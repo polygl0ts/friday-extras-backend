@@ -4,9 +4,9 @@
 a round trip on most requests but introduces a hazard the old code did not have:
 solve state can be up to `identity_cache_seconds` stale. Where that would turn
 into a *wrong rejection* - "solve this challenge first" moments after solving
-it, or an INTRO2 step refusing to advance - the route must re-ask rCTF.
+it - the route must re-ask rCTF.
 
-The frontend refetches both of those immediately after a correct flag, i.e.
+The frontend refetches immediately after a correct flag, i.e.
 exactly when the cache is guaranteed to be behind, so this is the realistic
 path rather than a corner case.
 """
@@ -30,7 +30,7 @@ def fake() -> FakeRctfClient:
             "id": "c1",
             "name": "cookie_monster",
             "category": "web",
-            "tags": ["intro2"],
+            "tags": ["tier/bronze"],
             "sortWeight": 1,
         }
     ]
@@ -60,15 +60,6 @@ def test_submitting_right_after_solving_is_not_rejected_by_a_stale_cache(client,
     res = client.post("/api/writeups/c1/submit", json=BODY, headers=HEADERS)
 
     assert res.status_code == 200, res.json()
-
-
-def test_the_intro2_track_advances_right_after_solving(client, fake) -> None:
-    _warm_the_cache(client)
-    fake.solves["t1"] = {"c1"}
-
-    tracks = client.get("/api/intro2/tracks", headers=HEADERS).json()
-
-    assert [s["status"] for t in tracks for s in t["steps"]] == ["done"]
 
 
 def test_submission_is_still_refused_when_the_challenge_really_is_unsolved(client, fake) -> None:

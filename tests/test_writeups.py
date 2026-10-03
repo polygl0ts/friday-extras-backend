@@ -55,7 +55,51 @@ def publish(client: TestClient, writeup_id: int) -> None:
 
 def test_requires_auth(client: TestClient) -> None:
     assert client.get("/api/writeups/mine").status_code == 401
-    assert client.get("/api/writeups").status_code == 401
+
+
+def test_guests_can_list_published_writeups(
+    client: TestClient, fake_client: FakeRctfClient
+) -> None:
+    setup_teams(fake_client)
+    writeup_id = submit(client)
+    assert client.get("/api/writeups").json() == []
+
+    publish(client, writeup_id)
+    cards = client.get("/api/writeups").json()
+    assert [c["id"] for c in cards] == [writeup_id]
+    assert cards[0]["voted"] is False
+
+
+def test_guests_read_the_intro_but_never_the_solution(
+    client: TestClient, fake_client: FakeRctfClient
+) -> None:
+    setup_teams(fake_client)
+    writeup_id = submit(client)
+
+    assert client.get(f"/api/writeups/item/{writeup_id}").status_code == 404
+
+    publish(client, writeup_id)
+    resp = client.get(f"/api/writeups/item/{writeup_id}")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["redacted"] is True
+    assert payload["solution_md"] is None
+    assert payload["intro_md"] == INTRO
+    assert "xor(c3, c7)" not in resp.text
+
+
+def test_a_broken_session_is_refused_rather_than_treated_as_a_guest(
+    client: TestClient, fake_client: FakeRctfClient
+) -> None:
+    setup_teams(fake_client)
+    assert client.get("/api/writeups", headers=auth("no-such-token")).status_code == 401
+
+
+def test_guests_cannot_vote(client: TestClient, fake_client: FakeRctfClient) -> None:
+    setup_teams(fake_client)
+    writeup_id = submit(client)
+    publish(client, writeup_id)
+    assert client.post(f"/api/writeups/item/{writeup_id}/vote").status_code == 401
 
 
 def test_submit_blocked_when_not_solved(client: TestClient, fake_client: FakeRctfClient) -> None:

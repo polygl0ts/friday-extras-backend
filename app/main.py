@@ -7,7 +7,7 @@ from app.auth import get_current_identity
 from app.config import settings
 from app.db import create_db_and_tables
 from app.rctf_client import TeamIdentity
-from app.routers import admin, decks, events, intro2, writeups
+from app.routers import admin, events, writeups
 
 
 @asynccontextmanager
@@ -27,9 +27,7 @@ app.add_middleware(
 )
 
 app.include_router(writeups.router, prefix="/api")
-app.include_router(decks.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
-app.include_router(intro2.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 
 
@@ -40,13 +38,7 @@ def healthz() -> dict[str, str]:
 
 @app.get("/api/me")
 def me(identity: TeamIdentity = Depends(get_current_identity)) -> dict[str, object]:
-    """Echoes back who a bearer token resolves to.
-
-    No longer called by the SPA - it now derives the same three fields from
-    rCTF's `/v2/users/me`, which it fetches anyway, instead of paying a second
-    identity round trip for them. Kept as the one route that shows what this
-    service makes of a token, which is what you want when debugging a 403.
-    """
+    """Echoes back who a bearer token resolves to."""
     return {
         "team_id": identity.team_id,
         "team_name": identity.team_name,
