@@ -97,14 +97,6 @@ class WriteupGrade(SQLModel, table=True):
     scores: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
 
 
-class Event(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    title: str
-    starts_at: datetime = Field(sa_column=_utc_column())
-    location: str = ""
-    description: str = ""
-
-
 class DiscordConfig(SQLModel, table=True):
     """Where notifications go. One webhook, no per-event switches.
 
