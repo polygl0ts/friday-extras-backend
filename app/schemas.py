@@ -8,6 +8,7 @@ from pydantic import (
     Field,
     StrictBool,
     StrictInt,
+    StringConstraints,
     field_validator,
 )
 
@@ -16,6 +17,7 @@ from app.models import (
     GRADE_MAX,
     GRADE_MIN,
     RATED_CRITERIA,
+    InviteStatus,
     Writeup,
     WriteupGrade,
     WriteupStatus,
@@ -250,6 +252,49 @@ class DiscordTestResult(BaseModel):
     detail: str
 
 
+TeamName = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[^\x00-\x1f\x7f]+$",
+    ),
+]
+Email = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, max_length=254, pattern=r'^[^@\s,;<>"]+@[^@\s,;<>"]+$'
+    ),
+]
+
+
+class InviteRequest(BaseModel):
+    team_name: TeamName
+    email: Email
+
+
+class InviteSubmitRequest(InviteRequest):
+    token: str = Field(max_length=100)
+
+
+class InviteWhoamiOut(BaseModel):
+    team_name: str
+
+
+class InviteOut(BaseModel):
+    id: int
+    team_name: str
+    email: str
+    status: InviteStatus
+    token: Optional[str] = None
+    revoked: bool
+    invited_by_id: Optional[int] = None
+    #: The inviter's team name, or "LakeOrga" for a root team.
+    invited_by: str
+    created_at: UtcDatetime
+    decided_by: Optional[str] = None
+    decided_at: Optional[UtcDatetime] = None
 
 
 class AdminStatsOut(BaseModel):

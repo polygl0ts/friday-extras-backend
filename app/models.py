@@ -110,3 +110,29 @@ class DiscordConfig(SQLModel, table=True):
     # API: settable via PUT, never returned by GET, so it cannot leak back out
     # to a client. Empty means "fall back to settings.discord_webhook_url".
     webhook_url: str = ""
+
+
+class InviteStatus(str, Enum):
+    pending = "pending"
+    accepted = "accepted"
+    rejected = "rejected"
+
+
+class Invite(SQLModel, table=True):
+    """One team in the Lake Quals invitation chain.
+
+    A token is valid only while `status == accepted and not revoked`.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    team_name: str
+    email: str
+    status: InviteStatus = Field(default=InviteStatus.pending, index=True)
+    token: Optional[str] = Field(default=None, unique=True, index=True)
+    revoked: bool = False
+    invited_by_id: Optional[int] = Field(default=None, foreign_key="invite.id")
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=_utc_column())
+    decided_by: Optional[str] = None
+    decided_at: Optional[datetime] = Field(
+        default=None, sa_column=_utc_column(nullable=True)
+    )

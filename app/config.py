@@ -38,5 +38,20 @@ class Settings(BaseSettings):
     # we ask rCTF again.
     identity_cache_seconds: int = 30
 
+    # Lake Quals invitations. A Discord application of its own, separate from
+    # the writeup webhook above, because its buttons call back into this
+    # service. Left empty, invites are stored but nothing is posted.
+    discord_bot_token: str = ""
+    discord_public_key: str = ""
+    discord_invite_channel_id: str = ""
+
+    # Mailbox the invitation tokens are sent from.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    # Defaults to `smtp_user`.
+    smtp_from: str = ""
+
 
 settings = Settings()

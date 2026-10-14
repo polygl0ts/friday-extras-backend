@@ -7,7 +7,7 @@ from app.auth import get_current_identity
 from app.config import settings
 from app.db import create_db_and_tables
 from app.rctf_client import TeamIdentity
-from app.routers import admin, writeups
+from app.routers import admin, invites, writeups
 
 
 @asynccontextmanager
@@ -28,6 +28,9 @@ app.add_middleware(
 
 app.include_router(writeups.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(invites.router, prefix="/api")
+app.include_router(invites.admin_router, prefix="/api")
+app.include_router(invites.discord_router, prefix="/api")
 
 
 @app.get("/healthz")

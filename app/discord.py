@@ -1,7 +1,13 @@
+import logging
+
 import httpx
+from nacl.exceptions import BadSignatureError
+from nacl.signing import VerifyKey
 from sqlmodel import Session
 
 from app.models import DiscordConfig
+
+logger = logging.getLogger(__name__)
 
 _COLOR = 0xFF2B3E  # matches the Polygl0ts CTF brand red used in the design
 
@@ -100,3 +106,69 @@ async def notify(
     if not webhook_url:
         return
     await post(webhook_url, event, fields, url)
+
+
+# Team names come from a public form, so nothing in an invite message may ping.
+NO_MENTIONS: dict = {"parse": []}
+
+
+async def post_invite(invite_id: int, inviter: str, team_name: str, email: str) -> None:
+    """Post a pending invite with Accept / Reject buttons, via the Lake Quals bot."""
+    from app.config import settings
+
+    if not (settings.discord_bot_token and settings.discord_invite_channel_id):
+        return
+
+    payload = {
+        "content": f"**{inviter}** invites **{team_name}** ({email})",
+        "allowed_mentions": NO_MENTIONS,
+        "components": [
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 2,
+                        "style": 3,
+                        "label": "Accept",
+                        "custom_id": f"invite:accept:{invite_id}",
+                    },
+                    {
+                        "type": 2,
+                        "style": 4,
+                        "label": "Reject",
+                        "custom_id": f"invite:reject:{invite_id}",
+                    },
+                ],
+            }
+        ],
+    }
+    url = f"https://discord.com/api/v10/channels/{settings.discord_invite_channel_id}/messages"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                url,
+                json=payload,
+                headers={"Authorization": f"Bot {settings.discord_bot_token}"},
+            )
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "Could not post invite %s: %s", invite_id, exc.__class__.__name__
+        )
+        return
+    if resp.status_code >= 400:
+        logger.warning(
+            "Discord refused invite %s (%s): %s", invite_id, resp.status_code, resp.text
+        )
+
+
+def signature_valid(
+    public_key: str, signature: str, timestamp: str, body: bytes
+) -> bool:
+    """Discord's Ed25519 check on an interaction request."""
+    try:
+        VerifyKey(bytes.fromhex(public_key)).verify(
+            timestamp.encode() + body, bytes.fromhex(signature)
+        )
+    except (BadSignatureError, ValueError):
+        return False
+    return True
